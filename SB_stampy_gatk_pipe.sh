@@ -119,6 +119,7 @@ java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
 	-T HaplotypeCaller \
 	-I  $bam/$prefix.realign.bam \
 	--emitRefConfidence GVCF \
+	--max_alternate_alleles 2 \ 
 	-variant_index_type LINEAR \
 	-variant_index_parameter 128000 \
 	-o $gvcf/$prefix.GATK.gvcf.vcf
@@ -141,7 +142,7 @@ java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
 	$tmp \
 	-o $Hpath/SB.GATK.total.vcf \
 	-inv \
-	--max_alternate_alleles 10
+	--max_alternate_alleles 4
 
 
 exit
