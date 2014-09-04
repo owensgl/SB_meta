@@ -142,7 +142,7 @@ java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
 	$tmp \
 	-o $Hpath/SB.GATK.total.vcf \
 	-inv \
-	--max_alternate_alleles 4
+	--max_alternate_alleles 3
 
 
 exit
