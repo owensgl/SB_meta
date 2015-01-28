@@ -141,8 +141,8 @@ java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
 	-T GenotypeGVCFs \
 	$tmp \
 	-o $Hpath/SB.GATK.total.vcf \
-	-inv \
-	--max_alternate_alleles 4
+	-allSites \
+	--max_alternate_alleles 3
 
 
 exit
