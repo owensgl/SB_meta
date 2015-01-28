@@ -5,20 +5,20 @@
 #Pipeline for using GATK and BWA to call snps
 plate="$1"
 Gpath='/home/owens/bin'
-Hpath='/home/owens/SB'
+Hpath='/home/owens/meta/9spine'
 rawdata='/home/owens/raw_data'
 bwa='/home/owens/bin/bwa-0.7.9a'
 demultiplex='/home/owens/bin/GBS_fastq_Demultiplexer_v8.GO.pl'
 barcodes="/home/owens/SB/Barcodes.$plate.txt"
 ref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel.fa'
 stampyref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel'
-cleandata="/home/owens/SB/$plate.clean_data_paired"
-trimmeddata="/home/owens/SB/$plate.trimmed_data_paired"
-unpaired="/home/owens/SB/$plate.trimmed_data_unpaired"
-sam="/home/owens/SB/$plate.sam"
-bam="/home/owens/SB/$plate.bam"
-log="/home/owens/SB/$plate.log"
-gvcf="/home/owens/SB/gvcf"
+cleandata="/home/owens/meta/9spine/$plate.clean_data_paired"
+trimmeddata="/home/owens/meta/9spine/$plate.trimmed_data_paired"
+unpaired="/home/owens/meta/9spine/$plate.trimmed_data_unpaired"
+sam="/home/owens/meta/9spine/$plate.sam"
+bam="/home/owens/meta/9spine/$plate.bam"
+log="/home/owens/meta/9spine/$plate.log"
+gvcf="/home/owens/meta/9spine"
 tabix='/home/owens/bin/tabix-0.2.6'
 vcftools='/home/owens/bin/vcftools_0.1.12a/bin'
 picardtools='/home/owens/bin/picard-tools-1.114'
@@ -54,14 +54,14 @@ if [ ! -d "$unpaired" ]; then
 fi
 
 #Demultiplex
-perl $demultiplex $barcodes $rawdata/"$plate"_R1.fastq $rawdata/"$plate"_R2.fastq $cleandata/
+#perl $demultiplex $barcodes $rawdata/"$plate"_R1.fastq $rawdata/"$plate"_R2.fastq $cleandata/
 
 
 ls $cleandata | grep -v "nobar" | grep -v "POND" | sed s/_R1//g | sed s/_R2//g | sed s/.fastq// | uniq  > $Hpath/Samplelist.$plate.txt
 #Trim the data using Trimmomatic. Removes bad reads and illumina adapter contamination.
 while read prefix
 do
-java -jar $trim/trimmomatic-0.32.jar PE -phred33 $cleandata/"$prefix"_R1.fastq $cleandata/"$prefix"_R2.fastq $trimmeddata/"$prefix"_R1.fastq $unpaired/"$prefix"_unR1.fastq $trimmeddata/"$prefix"_R2.fastq $unpaired/"$prefix"_unR2.fastq ILLUMINACLIP:$trim/adapters/TruSeq3-PE.fa:2:30:10:8:T SLIDINGWINDOW:4:15 MINLEN:36
+java -jar $trim/trimmomatic-0.32.jar PE -phred64 $cleandata/"$prefix"_R1.fastq $cleandata/"$prefix"_R2.fastq $trimmeddata/"$prefix"_R1.fastq $unpaired/"$prefix"_unR1.fastq $trimmeddata/"$prefix"_R2.fastq $unpaired/"$prefix"_unR2.fastq ILLUMINACLIP:$trim/adapters/TruSeq3-PE.fa:2:30:10:8:T SLIDINGWINDOW:4:15 MINLEN:36
 done < Samplelist.$plate.txt
 ls  $trimmeddata | grep -v "nobar" | sed s/_R1//g | sed s/_R2//g | sed s/.fastq// | uniq  > $Hpath/Samplelist.$plate.txt
 
@@ -95,7 +95,7 @@ java -Xmx4g -jar $Gpath/GenomeAnalysisTK.jar \
    -T RealignerTargetCreator \
    -R $ref \
    -I $Hpath/bamlist.$plate.list \
-   -nt 8 \
+   -nt 4 \
    -log $log/$plate.RealignerTargetCreator.log \
    -o $Hpath/$plate.realign.intervals
 
@@ -112,38 +112,17 @@ java -Xmx4g -jar $Gpath/GenomeAnalysisTK.jar \
 
 #Call GATK HaplotypeCaller
 java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
-	-nct 8 \
+	-nt 3 \
 	-l INFO \
 	-R $ref \
 	-log $log/$plate.$prefix.HaplotypeCaller.log \
-	-T HaplotypeCaller \
-	-I  $bam/$prefix.realign.bam \
-	--emitRefConfidence GVCF \
-	--max_alternate_alleles 2 \
-	-variant_index_type LINEAR \
-	-variant_index_parameter 128000 \
-	-o $gvcf/${prefix}.GATK.gvcf.vcf
+	-T UnifiedGenotyper \
+	-I $bam/$prefix.realign.bam \
+	-o $gvcf/$prefix.vcf \
+	-stand_call_conf 30 \
+	-stand_emit_conf 30 \
+	--output_mode EMIT_ALL_SITES \
+	--sample_ploidy 96
 done < $Hpath/Samplelist.${plate}.txt
-exit
-#Make input list for GATK GenotypeGVCFs
-tmp=""
-while read prefix
-do
-        tmp="$tmp --variant $gvcf/$prefix.GATK.gvcf.vcf"
-done < $Hpath/Samplelist.$plate.txt
-
-#Genotype all gvcf together into one vcf file
-java -Xmx18g -jar $Gpath/GenomeAnalysisTK.jar \
-	-nt 8 \
-	-l INFO \
-	-R $ref \
-	-log $log/$plate.GenotypeGVCFs.log \
-	-T GenotypeGVCFs \
-	$tmp \
-	-o $Hpath/SB.GATK.total.vcf \
-	-inv \
-	--max_alternate_alleles 4
-
-
 exit
 

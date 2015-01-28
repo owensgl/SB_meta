@@ -10,8 +10,8 @@ rawdata='/home/owens/raw_data'
 bwa='/home/owens/bin/bwa-0.7.9a'
 demultiplex='/home/owens/bin/GBS_fastq_Demultiplexer_v8.GO.pl'
 barcodes="/home/owens/SB/Barcodes.$plate.txt"
-ref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel.fa'
-stampyref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel'
+ref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel.pluspitx1.fa'
+stampyref='/home/owens/ref/Gasterosteus_aculeatus.BROADS1.dna_rm.toplevel.pluspitx1'
 cleandata="/home/owens/SB/$plate.clean_data_paired"
 trimmeddata="/home/owens/SB/$plate.trimmed_data_paired"
 unpaired="/home/owens/SB/$plate.trimmed_data_unpaired"
@@ -54,35 +54,60 @@ if [ ! -d "$unpaired" ]; then
 fi
 
 #Demultiplex
-perl $demultiplex $barcodes $rawdata/"$plate"_R1.fastq $rawdata/"$plate"_R2.fastq $cleandata/
+#perl $demultiplex $barcodes $rawdata/"$plate"_R1.fastq $rawdata/"$plate"_R2.fastq $cleandata/
 
 
 ls $cleandata | grep -v "nobar" | grep -v "POND" | sed s/_R1//g | sed s/_R2//g | sed s/.fastq// | uniq  > $Hpath/Samplelist.$plate.txt
 #Trim the data using Trimmomatic. Removes bad reads and illumina adapter contamination.
-while read prefix
-do
-java -jar $trim/trimmomatic-0.32.jar PE -phred33 $cleandata/"$prefix"_R1.fastq $cleandata/"$prefix"_R2.fastq $trimmeddata/"$prefix"_R1.fastq $unpaired/"$prefix"_unR1.fastq $trimmeddata/"$prefix"_R2.fastq $unpaired/"$prefix"_unR2.fastq ILLUMINACLIP:$trim/adapters/TruSeq3-PE.fa:2:30:10:8:T SLIDINGWINDOW:4:15 MINLEN:36
-done < Samplelist.$plate.txt
+#while read prefix
+#do
+#java -jar $trim/trimmomatic-0.32.jar PE -phred33 $cleandata/"$prefix"_R1.fastq $cleandata/"$prefix"_R2.fastq $trimmeddata/"$prefix"_R1.fastq $unpaired/"$prefix"_unR1.fastq $trimmeddata/"$prefix"_R2.fastq $unpaired/"$prefix"_unR2.fastq ILLUMINACLIP:$trim/adapters/TruSeq3-PE.fa:2:30:10:8:T SLIDINGWINDOW:4:15 MINLEN:36
+#done < Samplelist.$plate.txt
 ls  $trimmeddata | grep -v "nobar" | sed s/_R1//g | sed s/_R2//g | sed s/.fastq// | uniq  > $Hpath/Samplelist.$plate.txt
 
 ###Align using BWA. Turn from sam to bam. Sort by coordinate and add read group data.
 while read prefix
 do
+	echo "Aligning ${prefix}_R1.fastq"
 	$bwa/bwa aln -t 8 $ref $trimmeddata/"$prefix"_R1.fastq 1> $trimmeddata/"$prefix"_R1.sai
+	echo "Aligning ${prefix}_R2.fastq"
 	$bwa/bwa aln -t 8 $ref $trimmeddata/"$prefix"_R2.fastq 1> $trimmeddata/"$prefix"_R2.sai
-	$bwa/bwa sampe $ref $trimmeddata/"$prefix"_R1.sai $trimmeddata/"$prefix"_R2.sai $trimmeddata/"$prefix"_R1.fastq $trimmeddata/"$prefix"_R2.fastq 1> $sam/$prefix.sam 2> $log/$prefix.bwasampe.log
-	samtools view -Sb $sam/$prefix.sam > $bam/$prefix.bam	
-	$stampy -g $stampyref -h $stampyref -t8 --bamkeepgoodreads -M $bam/$prefix.bam -o $bam/$prefix.stampy.bam 2> $log/$prefix.stampy.log
-	java -jar $picardtools/CleanSam.jar INPUT=$bam/$prefix.stampy.bam OUTPUT=$bam/$prefix.clean.bam 2> $log/$prefix.cleansam.log
-	java -jar $picardtools/SortSam.jar INPUT=$bam/$prefix.clean.bam OUTPUT=$bam/$prefix.sort.bam SORT_ORDER=coordinate 2> $log/$prefix.sortsam.log
-	java -jar $picardtools/AddOrReplaceReadGroups.jar I=$bam/$prefix.sort.bam O= $bam/$prefix.sortrg.bam SORT_ORDER=coordinate RGID=$prefix RGLB=$project RGPL=ILLUMINA RGPU=$project RGSM=$prefix CREATE_INDEX=True 2> $log/$prefix.addRG.log
+	echo "Combining alignments for $prefix"
+	$bwa/bwa sampe $ref $trimmeddata/"$prefix"_R1.sai $trimmeddata/"$prefix"_R2.sai $trimmeddata/"$prefix"_R1.fastq $trimmeddata/"$prefix"_R2.fastq 2> $log/$prefix.bwasampe.log | \
+	samtools view -Sb - > $bam/${prefix}_premerge.bam
+	echo "Stampy realignment on $prefix"
+        $stampy -g $stampyref -h $stampyref -t8 --bamkeepgoodreads -M $bam/${prefix}_premerge.bam -o $bam/${prefix}_premerge.stampy.bam 2> $log/$prefix.stampy.log
+
+	echo "Aligning orphaned ${prefix}_R1.fastq"
+	$bwa/bwa aln -t 8 $ref $unpaired/"$prefix"_unR1.fastq 1> $unpaired/"$prefix"_unR1.sai
+	$bwa/bwa samse $ref $unpaired/"$prefix"_unR1.sai $unpaired/"$prefix"_unR1.fastq 2> $log/${prefix}_unR1.bwasamse.log | \
+	samtools view -Sb - > $bam/${prefix}_unR1.bam
+	echo "Stampy realignment on orphaned ${prefix}_R1.fastq"
+	$stampy -g $stampyref -h $stampyref -t8 --bamkeepgoodreads -M $bam/${prefix}_unR1.bam -o $bam/${prefix}_unR1.stampy.bam 2> $log/${prefix}_unR1.stampy.log	
+
+	echo "Aligning orphaned ${prefix}_R2.fastq"
+	$bwa/bwa aln -t 8 $ref $unpaired/"$prefix"_unR2.fastq 1> $unpaired/"$prefix"_unR2.sai
+	$bwa/bwa samse $ref $unpaired/"$prefix"_unR2.sai $unpaired/"$prefix"_unR2.fastq 2> $log/${prefix}_unR2.bwasamse.log | \
+	samtools view -Sb - > $bam/${prefix}_unR2.bam
+	echo "Stampy realignment on orphaned ${prefix}_R2.fastq"
+	$stampy -g $stampyref -h $stampyref -t8 --bamkeepgoodreads -M $bam/${prefix}_unR2.bam -o $bam/${prefix}_unR2.stampy.bam 2> $log/${prefix}_unR2.stampy.log
+	
+	echo "Picardtools bam processing of $prefix"
+	java -jar $picardtools/MergeSamFiles.jar INPUT=$bam/${prefix}_premerge.stampy.bam INPUT=$bam/${prefix}_unR1.stampy.bam INPUT=$bam/${prefix}_unR2.stampy.bam OUTPUT=/dev/stdout SORT_ORDER=coordinate USE_THREADING=true 2> $log/$prefix.mergesam.log | \
+	java -jar $picardtools/CleanSam.jar INPUT=/dev/stdin OUTPUT=/dev/stdout 2> $log/$prefix.cleansam.log | \
+	java -jar $picardtools/AddOrReplaceReadGroups.jar I=/dev/stdin O= $bam/$prefix.sortrg.bam SORT_ORDER=coordinate RGID=$prefix RGLB=$project RGPL=ILLUMINA RGPU=$project RGSM=$prefix CREATE_INDEX=True 2> $log/$prefix.addRG.log
 	rm $trimmeddata/"$prefix"_R1.sai
 	rm $trimmeddata/"$prefix"_R2.sai
-	rm $sam/$prefix.sam
-	rm $bam/$prefix.bam
+	rm $unpaired/"$prefix"_unR1.sai
+	rm $unpaired/"$prefix"_unR2.sai
+	rm $bam/${prefix}_premerge.bam
+	rm $bam/${prefix}_unR1.bam
+	rm $bam/${prefix}_unR2.bam
+	rm $bam/${prefix}_premerge.stampy.bam
 	rm $bam/$prefix.stampy.bam
-	rm $bam/$prefix.clean.bam
-	rm $bam/$prefix.sort.bam
+	rm $bam/${prefix}_unR1.stampy.bam
+	rm $bam/${prefix}_unR2.stampy.bam
+
 done < Samplelist.$plate.txt
 
 
